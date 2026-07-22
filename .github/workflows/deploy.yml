@@ -1,0 +1,93 @@
+name: CI/CD - ECS Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  ECR_REPOSITORY: wsc-cicd-ecr
+  ECS_CLUSTER: wsc-cicd-ecs-cluster
+  ECS_SERVICE: wsc-cicd-ecs-svc
+  TASKDEF_FAMILY: wsc-cicd-ecs-taskdef
+  CONTAINER_NAME: wsc-cicd-ecs-cnt
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate Next Version
+        id: version
+        shell: bash
+        run: |
+          TAGS=$(aws ecr list-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --query 'imageIds[].imageTag' \
+            --output text)
+
+          LAST=$(echo "$TAGS" | tr '\t' '\n' | grep '^v' | sort -V | tail -1)
+
+          if [ -z "$LAST" ]; then
+            VERSION="v1.0.0"
+          else
+            PATCH=$(echo "${LAST#v}" | cut -d. -f3)
+            VERSION="v1.0.$((PATCH+1))"
+          fi
+
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          echo "Next Version : $VERSION"
+
+      - name: Build Docker Image
+        run: |
+          docker build -t $ECR_REPOSITORY:$VERSION .
+          docker tag $ECR_REPOSITORY:$VERSION \
+          ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$VERSION
+
+      - name: Push Docker Image
+        run: |
+          docker push \
+          ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$VERSION
+
+      - name: Download Task Definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition $TASKDEF_FAMILY \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Render Task Definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}
+
+      - name: Deploy ECS Service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          service: ${{ env.ECS_SERVICE }}
+          wait-for-service-stability: true
