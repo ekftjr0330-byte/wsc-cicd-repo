@@ -90,7 +90,7 @@ jobs:
           cluster: ${{ env.CLUSTER }}
           service: ${{ env.SERVICE }}
           task-definition: ${{ steps.render.outputs.task-definition }}
-          wait-for-service-stability: true
+          wait-for-service-stability: false
 
       - name: Deployment
         shell: bash
