@@ -23,20 +23,20 @@ jobs:
 
     steps:
       - name: Checkout Source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
-      - name: Configure 
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.REGION }}
 
-      - name: Login ECR
+      - name: Login to Amazon ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Image Tag
+      - name: Determine Image Tag
         id: tag
         shell: bash
         run: |
@@ -58,7 +58,7 @@ jobs:
           echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Build Image
+      - name: Build and Push Docker Image
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
@@ -69,14 +69,16 @@ jobs:
 
           echo "IMAGE_URI=$IMAGE" >> $GITHUB_ENV
 
-      - name: Task Definition
+      - name: Download Task Definition & Clean Metadata
         run: |
           aws ecs describe-task-definition \
             --task-definition $TASK_FAMILY \
             --query taskDefinition \
-            > taskdef.json
+            > raw_taskdef.json
 
-      - name: Container Image
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' raw_taskdef.json > taskdef.json
+
+      - name: Render Task Definition
         id: render
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
@@ -84,7 +86,7 @@ jobs:
           container-name: ${{ env.CONTAINER }}
           image: ${{ env.IMAGE_URI }}
 
-      - name: ECS Service
+      - name: Deploy to ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           cluster: ${{ env.CLUSTER }}
@@ -92,7 +94,7 @@ jobs:
           task-definition: ${{ steps.render.outputs.task-definition }}
           wait-for-service-stability: false
 
-      - name: Deployment
+      - name: Verify Deployment Status
         shell: bash
         run: |
           aws ecs describe-services \
