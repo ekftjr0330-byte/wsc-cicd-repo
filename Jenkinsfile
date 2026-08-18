@@ -88,14 +88,34 @@ pipeline {
             }
         }
 
-        stage('Register New Definition & Update ECS Service') {
+        stage('Register New Definition') {
             steps {
                 script {
+
                     sh """
                         aws ecs describe-task-definition --region ${env.AWS_REGION} --task-definition ${env.ECS_TASKDEF_NAME} --query taskDefinition > raw_taskdef.json
-                        jq --arg IMAGE "${env.DOCKER_IMAGE}" 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | .containerDefinitions[0].image = \$IMAGE' raw_taskdef.json > taskdef.json
+                        jq --arg IMAGE "${env.DOCKER_IMAGE}" 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | .containerDefinitions[0].image = \\$IMAGE' raw_taskdef.json > taskdef.json
                         aws ecs register-task-definition --region ${env.AWS_REGION} --cli-input-json file://taskdef.json --query "taskDefinition.taskDefinitionArn" --output text > new_task_arn.txt
-                        xargs aws ecs update-service --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --service ${env.ECS_SERVICE_NAME} --task-definition < new_task_arn.txt --force-new-deployment
+                    """
+                }
+            }
+        }
+
+        stage('Update ECS Service') {
+            steps {
+                script {
+
+                    def newTaskArn = sh(
+                        script: 'cat new_task_arn.txt',
+                        returnStdout: true
+                    ).trim()
+
+                    if (!newTaskArn) {
+                        error('New Task Definition ARN is empty.')
+                    }
+
+                    sh """
+                        aws ecs update-service --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --service ${env.ECS_SERVICE_NAME} --task-definition ${newTaskArn} --force-new-deployment
                     """
                 }
             }
@@ -105,12 +125,13 @@ pipeline {
             steps {
                 script {
                     sh """
-                        aws ecs describe-services --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --services ${env.ECS_SERVICE_NAME} --query 'services[0].deployments[*].[status,rolloutState,taskDefinition]' --output table
+                        aws ecs describe-services --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --services ${env.ECS_SERVICE_NAME} --query 'services[0].deployments[*].[status,rolloutState,taskDefinition,desiredCount,runningCount]' --output table
                     """
                 }
             }
         }
     }
+
 
     post {
         success {
