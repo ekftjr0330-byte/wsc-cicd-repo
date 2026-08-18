@@ -94,7 +94,7 @@ pipeline {
 
                     sh """
                         aws ecs describe-task-definition --region ${env.AWS_REGION} --task-definition ${env.ECS_TASKDEF_NAME} --query taskDefinition > raw_taskdef.json
-                        jq --arg IMAGE "${env.DOCKER_IMAGE}" 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | .containerDefinitions[0].image = \\$IMAGE' raw_taskdef.json > taskdef.json
+                        jq --arg DOCKER_IMAGE "${env.DOCKER_IMAGE}" 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | .containerDefinitions[0].image = \\$DOCKER_IMAGE' raw_taskdef.json > taskdef.json
                         aws ecs register-task-definition --region ${env.AWS_REGION} --cli-input-json file://taskdef.json --query "taskDefinition.taskDefinitionArn" --output text > new_task_arn.txt
                     """
                 }
