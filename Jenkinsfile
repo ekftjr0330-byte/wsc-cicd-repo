@@ -14,7 +14,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout') {
             steps {
                 checkout scm
@@ -24,29 +23,14 @@ pipeline {
         stage('Get AWS Account ID') {
             steps {
                 script {
-                    def accountId = sh(script: 'aws sts get-caller-identity --query Account --output text', returnStdout: true).trim()
+                    def accountId = sh(
+                        script: "aws sts get-caller-identity --query Account --output text",
+                        returnStdout: true
+                    ).trim()
+                    
                     env.AWS_ACCOUNT_ID = accountId
                     env.ECR_REGISTRY = "${accountId}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
-
                     echo "AWS Account ID: ${env.AWS_ACCOUNT_ID}"
-                    echo "AWS Region: ${env.AWS_REGION}"
-                }
-            }
-        }
-
-        stage('Verify ECS Resources') {
-            steps {
-                script {
-                    sh """
-                        echo "=== ECS Cluster ==="
-                        aws ecs describe-clusters --region ${env.AWS_REGION} --clusters ${env.ECS_CLUSTER_NAME} --query 'clusters[*].[clusterName,status]' --output table
-
-                        echo "=== ECS Service ==="
-                        aws ecs describe-services --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --services ${env.ECS_SERVICE_NAME} --query 'services[*].[serviceName,status,taskDefinition]' --output table
-
-                        echo "=== Task Definitions ==="
-                        aws ecs list-task-definitions --region ${env.AWS_REGION} --family-prefix ${env.ECS_TASKDEF_NAME} --query 'taskDefinitionArns[*]' --output table
-                    """
                 }
             }
         }
@@ -54,22 +38,23 @@ pipeline {
         stage('Determine Next Image Tag') {
             steps {
                 script {
-                    def stdout = sh(script: "aws ecr list-images --region ${env.AWS_REGION} --repository-name ${env.ECR_REPO} --query 'imageIds[*].imageTag' --output text", returnStdout: true).trim()
+                    def stdout = sh(
+                        script: "aws ecr list-images --region ${env.AWS_REGION} --repository-name ${env.ECR_REPO} --query 'imageIds[*].imageTag' --output text",
+                        returnStdout: true
+                    ).trim()
 
                     if (!stdout || stdout == 'None' || stdout == 'null' || stdout.isEmpty()) {
                         env.IMAGE_TAG = 'v1.0.0'
                     } else {
-                        def existingTags = stdout.split(/\\s+/)
-                        def semverPattern = /^v\\d+\\.\\d+\\.\\d+$/
+                        def existingTags = stdout.split(/\s+/)
+                        def semverPattern = /^v\d+\.\d+\.\d+$/
                         def versions = existingTags.findAll { it ==~ semverPattern }
 
                         if (versions) {
-                            def maxVersion = [0, 0, 0]
-
+                            def maxVersion = [0,0,0]
                             versions.each { ver ->
-                                def parts = ver.replace('v', '').split('\\.').collect { it.toInteger() }
-
-                                for (int i = 0; i < 3; i++) {
+                                def parts = ver.replaceAll('v','').split('\\.').collect { it.toInteger() }
+                                for (int i=0; i<3; i++) {
                                     if (parts[i] > maxVersion[i]) {
                                         maxVersion = parts
                                         break
@@ -78,7 +63,6 @@ pipeline {
                                     }
                                 }
                             }
-
                             maxVersion[2] += 1
                             env.IMAGE_TAG = "v${maxVersion.join('.')}"
                         } else {
@@ -87,9 +71,7 @@ pipeline {
                     }
 
                     env.DOCKER_IMAGE = "${env.ECR_REGISTRY}/${env.ECR_REPO}:${env.IMAGE_TAG}"
-
                     echo "Next Docker Image Tag: ${env.IMAGE_TAG}"
-                    echo "Docker Image: ${env.DOCKER_IMAGE}"
                 }
             }
         }
@@ -98,9 +80,9 @@ pipeline {
             steps {
                 script {
                     sh """
-                        aws ecr get-login-password --region ${env.AWS_REGION} | docker login --username AWS --password-stdin ${env.ECR_REGISTRY}
-                        docker build -t ${env.DOCKER_IMAGE} .
-                        docker push ${env.DOCKER_IMAGE}
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker build -t ${DOCKER_IMAGE} .
+                    docker push ${DOCKER_IMAGE}
                     """
                 }
             }
@@ -110,19 +92,12 @@ pipeline {
             steps {
                 script {
                     sh """
-                        echo "=== Get Current Task Definition ==="
                         aws ecs describe-task-definition --region ${env.AWS_REGION} --task-definition ${env.ECS_TASKDEF_NAME} --query taskDefinition > raw_taskdef.json
 
-                        echo "=== Create New Task Definition ==="
                         jq --arg IMAGE "${env.DOCKER_IMAGE}" 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | .containerDefinitions[0].image = \\$IMAGE' raw_taskdef.json > taskdef.json
 
-                        echo "=== Register New Task Definition ==="
                         aws ecs register-task-definition --region ${env.AWS_REGION} --cli-input-json file://taskdef.json --query "taskDefinition.taskDefinitionArn" --output text > new_task_arn.txt
 
-                        echo "=== New Task Definition ==="
-                        cat new_task_arn.txt
-
-                        echo "=== Update ECS Service ==="
                         NEW_TASK_ARN=\\$(cat new_task_arn.txt)
                         aws ecs update-service --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --service ${env.ECS_SERVICE_NAME} --task-definition \\$NEW_TASK_ARN --force-new-deployment
                     """
@@ -134,7 +109,6 @@ pipeline {
             steps {
                 script {
                     sh """
-                        echo "=== ECS Deployment Status ==="
                         aws ecs describe-services --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --services ${env.ECS_SERVICE_NAME} --query 'services[0].deployments[*].[status,rolloutState,taskDefinition]' --output table
                     """
                 }
