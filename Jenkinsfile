@@ -7,7 +7,7 @@ pipeline {
 
         ECS_CLUSTER_NAME = 'wsc-cicd-ecs-cluster'
         ECS_SERVICE_NAME = 'wsc-cicd-ecs-svc'
-        ECS_TASKDEF_NAME = 'wsc-cicd-ecs-task'
+        ECS_TASKDEF_NAME = 'wsc-cicd-ecs-taskdef'
         ECS_CONTAINER_NAME = 'wsc-cicd-ecs-cnt'
 
         GITHUB_CRED_ID = 'github'
