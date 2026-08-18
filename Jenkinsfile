@@ -93,13 +93,9 @@ pipeline {
                 script {
                     sh """
                         aws ecs describe-task-definition --region ${env.AWS_REGION} --task-definition ${env.ECS_TASKDEF_NAME} --query taskDefinition > raw_taskdef.json
-
-                        jq --arg IMAGE "${env.DOCKER_IMAGE}" 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | .containerDefinitions[0].image = \\$IMAGE' raw_taskdef.json > taskdef.json
-
+                        jq --arg IMAGE "${env.DOCKER_IMAGE}" 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | .containerDefinitions[0].image = \$IMAGE' raw_taskdef.json > taskdef.json
                         aws ecs register-task-definition --region ${env.AWS_REGION} --cli-input-json file://taskdef.json --query "taskDefinition.taskDefinitionArn" --output text > new_task_arn.txt
-
-                        NEW_TASK_ARN=\\$(cat new_task_arn.txt)
-                        aws ecs update-service --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --service ${env.ECS_SERVICE_NAME} --task-definition \\$NEW_TASK_ARN --force-new-deployment
+                        xargs aws ecs update-service --region ${env.AWS_REGION} --cluster ${env.ECS_CLUSTER_NAME} --service ${env.ECS_SERVICE_NAME} --task-definition < new_task_arn.txt --force-new-deployment
                     """
                 }
             }
@@ -120,7 +116,6 @@ pipeline {
         success {
             echo "Successfully deployed ${env.DOCKER_IMAGE}"
         }
-
         always {
             sh "docker rmi ${env.DOCKER_IMAGE} || true"
             cleanWs()
