@@ -1,10 +1,8 @@
-FROM python:3.11-alpine
-RUN apk update && \
-    apk upgrade --no-cache && \
-    apk add --no-cache curl
+FROM python:3.14-alpine
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+COPY main.py .
+RUN pip3 install --no-cache-dir flask &&  apk add --no-cache curl && rm -rf /root/.cache/
+RUN adduser --disabled-password --gecos '' app-user && chown -R app-user: /app
+ENV FLASK_APP=main.py
 EXPOSE 8080
-CMD ["python", "main.py"]
+CMD ["python3", "-m", "flask", "run", "--host=0.0.0.0", "--port=8080"]
